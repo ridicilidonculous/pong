@@ -1,0 +1,310 @@
+<html><head><base href="." /><meta charset="UTF-8" /><meta content="width=device-width, initial-scale=1.0" name="viewport" /><title>Enhanced Pong Game</title><style>
+body {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: #22292C;
+    font-family: 'Rubik Mono One', sans-serif;
+    overflow: hidden;
+}
+
+#gameCanvas {
+    border: 4px solid rgba(255, 255, 255, 0.5);
+    border-radius: 20px;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(2px);
+}
+
+.score {
+    color: white;
+    position: absolute;
+    top: 20px;
+    font-size: 72px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+    animation: glow 2s ease-in-out infinite alternate;
+    letter-spacing: 4px;
+}
+
+@keyframes glow {
+    from {
+        text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+    }
+    to {
+        text-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+    }
+}
+
+#player1Score {
+    left: 5%;
+}
+
+#player2Score {
+    right: 5%;
+}
+
+.particle {
+    position: absolute;
+    pointer-events: none;
+    background: white;
+    border-radius: 50%;
+    animation: particleAnimation 1s ease-out forwards;
+}
+
+@keyframes particleAnimation {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
+}
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap" rel="stylesheet"></head>
+<body>
+<div id="player1Score" class="score">0</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div id="player2Score" class="score">0</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const player1ScoreElement = document.getElementById('player1Score');
+const player2ScoreElement = document.getElementById('player2Score');
+
+const ball = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    radius: 10,
+    speed: 7,
+    dx: 5,
+    dy: 5,
+    trail: []
+};
+
+const paddleHeight = 100;
+const paddleWidth = 10;
+const paddle1 = {
+    x: 0,
+    y: canvas.height / 2 - paddleHeight / 2,
+    width: paddleWidth,
+    height: paddleHeight,
+    dy: 8,
+    maxSpeed: 16,
+    acceleration: 0.5,
+    currentSpeed: 8,
+    score: 0
+};
+
+const paddle2 = {
+    x: canvas.width - paddleWidth,
+    y: canvas.height / 2 - paddleHeight / 2,
+    width: paddleWidth,
+    height: paddleHeight,
+    dy: 8,
+    maxSpeed: 16,
+    acceleration: 0.5,
+    currentSpeed: 8,
+    score: 0,
+    aiMistakeCounter: 0
+};
+
+const keys = {
+    w: false,
+    s: false,
+    a: false,
+    d: false
+};
+
+let lastMoveTime = Date.now();
+const speedDecayRate = 0.2;
+
+document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() in keys) {
+        keys[e.key.toLowerCase()] = true;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() in keys) {
+        keys[e.key.toLowerCase()] = false;
+    }
+});
+
+function createParticles(x, y) {
+    for (let i = 0; i < 10; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = x + 'px';
+        particle.style.top = y + 'px';
+        particle.style.width = Math.random() * 4 + 2 + 'px';
+        particle.style.height = particle.style.width;
+        document.body.appendChild(particle);
+        setTimeout(() => particle.remove(), 1000);
+    }
+}
+
+function drawPaddle(x, y, width, height) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'white';
+    
+    ctx.beginPath();
+    const radius = 5;
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.shadowBlur = 0;
+}
+
+function drawBall() {
+    ball.trail.forEach((pos, index) => {
+        const alpha = (index / ball.trail.length) * 0.3;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, ball.radius * (index / ball.trail.length), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.fill();
+        ctx.closePath();
+    });
+
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = 'white';
+    ctx.fill();
+    ctx.closePath();
+    ctx.shadowBlur = 0;
+}
+
+function updateAI() {
+    paddle2.aiMistakeCounter++;
+    
+    if (paddle2.aiMistakeCounter > 60) {
+        paddle2.aiMistakeCounter = 0;
+        if (Math.random() < 0.3) {
+            return;
+        }
+    }
+
+    const paddleCenter = paddle2.y + paddle2.height / 2;
+    const ballCenter = ball.y;
+    const difference = paddleCenter - ballCenter;
+
+    if (Math.abs(difference) > 10) {
+        if (difference > 0) {
+            paddle2.y -= paddle2.currentSpeed;
+        } else {
+            paddle2.y += paddle2.currentSpeed;
+        }
+    }
+}
+
+function movePaddles() {
+    const currentTime = Date.now();
+    const deltaTime = (currentTime - lastMoveTime) / 1000;
+    lastMoveTime = currentTime;
+
+    paddle1.currentSpeed = Math.max(paddle1.dy, paddle1.currentSpeed - speedDecayRate);
+    paddle2.currentSpeed = Math.max(paddle2.dy, paddle2.currentSpeed - speedDecayRate);
+
+    if (keys.w && paddle1.y > 0) {
+        paddle1.currentSpeed = Math.min(paddle1.maxSpeed, paddle1.currentSpeed + paddle1.acceleration);
+        paddle1.y -= paddle1.currentSpeed;
+    }
+    if (keys.s && paddle1.y + paddle1.height < canvas.height) {
+        paddle1.currentSpeed = Math.min(paddle1.maxSpeed, paddle1.currentSpeed + paddle1.acceleration);
+        paddle1.y += paddle1.currentSpeed;
+    }
+
+    updateAI();
+
+    paddle1.y = Math.max(0, Math.min(canvas.height - paddle1.height, paddle1.y));
+    paddle2.y = Math.max(0, Math.min(canvas.height - paddle2.height, paddle2.y));
+}
+
+function moveBall() {
+    ball.trail.push({x: ball.x, y: ball.y});
+    if (ball.trail.length > 5) {
+        ball.trail.shift();
+    }
+
+    ball.x += ball.dx;
+    ball.y += ball.dy;
+
+    if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) {
+        ball.dy *= -1;
+        createParticles(ball.x, ball.y);
+    }
+
+    if (ball.dx < 0) {
+        if (ball.x - ball.radius < paddle1.x + paddle1.width &&
+            ball.y > paddle1.y &&
+            ball.y < paddle1.y + paddle1.height) {
+            ball.dx *= -1;
+            ball.speed += 0.2;
+            createParticles(ball.x, ball.y);
+        }
+    } else {
+        if (ball.x + ball.radius > paddle2.x &&
+            ball.y > paddle2.y &&
+            ball.y < paddle2.y + paddle2.height) {
+            ball.dx *= -1;
+            ball.speed += 0.2;
+            createParticles(ball.x, ball.y);
+        }
+    }
+
+    if (ball.x < 0) {
+        paddle2.score++;
+        player2ScoreElement.textContent = paddle2.score;
+        createParticles(ball.x, ball.y);
+        resetBall();
+    } else if (ball.x > canvas.width) {
+        paddle1.score++;
+        player1ScoreElement.textContent = paddle1.score;
+        createParticles(ball.x, ball.y);
+        resetBall();
+    }
+}
+
+function resetBall() {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height / 2;
+    ball.dx = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
+    ball.dy = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
+    ball.trail = [];
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPaddle(paddle1.x, paddle1.y, paddle1.width, paddle1.height);
+    drawPaddle(paddle2.x, paddle2.y, paddle2.width, paddle2.height);
+    drawBall();
+}
+
+function gameLoop() {
+    movePaddles();
+    moveBall();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+resetBall();
+gameLoop();
+</script>
+</body>
+</html>
